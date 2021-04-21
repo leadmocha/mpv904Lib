@@ -70,7 +70,7 @@ main(int argc, char *argv[]) {
 
 
   printf("Initializing mpv904\n");
-  stat = mpv904Init(14<<19,0,0);
+  stat = mpv904Init(14<<19,0,0,0);
   if(stat != OK) {
     printf("Error initializing mpv904\n");
   } else {
