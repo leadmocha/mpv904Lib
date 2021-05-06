@@ -1,28 +1,4 @@
-
-#define _GNU_SOURCE
-
-#define DEVEL
-
-#ifdef VXWORKS
-#include <vxWorks.h>
-#include <sysLib.h>
-#include <logLib.h>
-#include <taskLib.h>
-#include <intLib.h>
-#include <iv.h>
-#include <semLib.h>
-#include <vxLib.h>
-#include "vxCompat.h"
-#include "../jvme/jvme.h"
-#else
-#include <sys/prctl.h>
-#include <unistd.h>
-#include "jvme.h"
-#endif
-#include <stdio.h>
-#include <string.h>
-#include <pthread.h>
-#include "tiLib.h"
+/* #define CHECK_PLEASE */
 #define _GNU_SOURCE
 
 #define DEVEL
@@ -74,11 +50,48 @@ int mpv904CheckIdChan(int id, int ch)
 
   if( ch < 0 || ch >= MPV904_NCHAN) {
     printf("ERROR: (MPV904) Channel specified %d is invalid. Specify channel between 0 - %d.\n",
-      ch, MPV904_NCHAN);
+      ch, MPV904_NCHAN-1);
     return (ERROR);
   }
 
   return (OK);
+}
+/*
+ * Reset (i.e. Read) DAC value
+ */
+int mpv904ResetDAC(int id, int ch)
+{
+  int ret = mpv904CheckIdChan(id,ch);
+  if(ret!= OK)
+    return ret;
+
+#ifdef CHECK_PLEASE
+  unsigned long laddr = (unsigned long)(&(mpv904p[id]->out[ch]));
+  printf("%s: Read from address 0x%08x (0x%lx)\n",
+	 __func__,
+	 (unsigned int)(laddr-mpv904A24Offset),
+	 laddr);
+#endif
+
+  vmeRead16(&(mpv904p[id]->out[ch]));
+
+#ifdef CHECK_PLEASE
+  extern int jlabTsi148ClearBERR();
+  int rval = OK;
+
+  usleep(2000);
+  rval = jlabTsi148ClearBERR();
+
+  if(rval != OK) {
+    printf("%s: ERROR: Write to 0x%08x timed out\n",
+	   __func__, (unsigned int)(laddr-mpv904A24Offset));
+    return ERROR;
+  } else {
+    printf("%s: Success!\n", __func__);
+  }
+#endif
+
+  return OK;
 }
 
 /*
@@ -89,8 +102,36 @@ int mpv904SetDAC(int id, int ch, unsigned int dac)
   int ret = mpv904CheckIdChan(id,ch);
   if(ret!= OK)
     return ret;
+  if(dac > 4095) {
+    printf("Error DAC value must be between 0 to 0xFFF, you entered: 0x%03x\n",dac);
+    return -1;
+  }
 
-  vmeWrite32(&(mpv904p[id]->out[ch]),0xFFF);
+#ifdef CHECK_PLEASE
+  unsigned long laddr = (unsigned long)(&(mpv904p[id]->out[ch]));
+  printf("%s: Write to address 0x%08x (0x%lx): 0x%x (%d)\n",
+	 __func__,
+	 (unsigned int)(laddr-mpv904A24Offset), laddr, dac, dac);
+#endif
+
+  vmeWrite16(&(mpv904p[id]->out[ch]), dac);
+
+#ifdef CHECK_PLEASE
+  extern int jlabTsi148ClearBERR();
+  int rval = OK;
+
+  usleep(2000);
+  rval = jlabTsi148ClearBERR();
+
+  if(rval != OK) {
+    printf("%s: ERROR: Write to 0x%08x timed out\n",
+	   __func__, (unsigned int)(laddr-mpv904A24Offset));
+    return ERROR;
+  } else {
+    printf("%s: Success!\n", __func__);
+  }
+#endif
+
   return OK;
 }
 
@@ -200,12 +241,18 @@ STATUS mpv904Init(UINT32 addr, UINT32 addr_inc, int nmpv, unsigned int iFlag)
   nmpv904 = 0;
   for(ii = 0; ii < nmpv; ii++) {
     mpv904 = (struct mpv904_struct *)(laddr + ii * addr_inc);
+
+#ifdef PROBE_ADDRESS
     /* Check if the board exists at that address */
 #ifdef VXWORKS
     res = vxMemProbe((char *) &(mpv904->out[0]), VX_READ, 4, (char *) &rdata);
 #else
     res = vmeMemProbe((char *) &(mpv904->out[0]), 4, (char *) &rdata);
 #endif
+#else
+    res = 0;
+#endif
+
     if( res < 0 ) {
 #ifdef VXWORKS
       printf("mpv904Init: ERROR: No addressable board at addr=0x%x\n", (UINT32) mpv904);
